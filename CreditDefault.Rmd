@@ -1,0 +1,24 @@
+---
+title: "Credit Default"
+author: "Sofiya Hevorhyan"
+date: "24 04 2019"
+output: html_document
+---
+
+## 
+```{r}
+test <- read.csv(file="./data/test_bqCt9Pv.csv", header=TRUE,as.is=T)
+head(test)
+train <- read.csv(file="./data/train.csv")
+head(train)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
