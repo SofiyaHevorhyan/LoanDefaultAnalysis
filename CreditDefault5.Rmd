@@ -41,6 +41,7 @@ h3 { /* Header 3 */
 ### Read
 First of all, we read data and will try to explore it. To do things simplier wihtout code reapiting, we merge data sets test and train, adding the col istest as a indicator of observation identity and save info about loan default.
 ```{r}
+print("hello")
 test <- read.csv(file="data/test_bqCt9Pv.csv", header=TRUE, as.is=TRUE)
 train <- read.csv(file="data/train.csv", header=TRUE, as.is=TRUE)
 
