@@ -41,7 +41,6 @@ h3 { /* Header 3 */
 ### Read
 First of all, we read data and will try to explore it. To do things simplier wihtout code reapiting, we merge data sets test and train, adding the col istest as a indicator of observation identity and save info about loan default.
 ```{r}
-print("hello")
 test <- read.csv(file="data/test_bqCt9Pv.csv", header=TRUE, as.is=TRUE)
 train <- read.csv(file="data/train.csv", header=TRUE, as.is=TRUE)
 
@@ -49,7 +48,6 @@ train <- read.csv(file="data/train.csv", header=TRUE, as.is=TRUE)
 test$istest <- 1
 train$istest <- 0
 
-n_train <- length(train)
 loan_def <- train$loan_default
 
 merged <- rbind(train[, -41], test)
@@ -63,7 +61,8 @@ Our next step is to take closer look at the data, does is have any NAs and with 
 anyNA(merged)
 
 # check data type
-sapply(merged, class)
+m <- as.data.frame(sapply(merged, class))
+data.frame(t(m))
 ```
 ### Retype
 ```{r}
@@ -106,7 +105,6 @@ my.transform.to.month <- function(column) {
 }
 
 # deal with avr acct age and credit history length
-merged
 merged$AVERAGE.ACCT.AGE <- my.transform.to.month(merged$AVERAGE.ACCT.AGE)
 merged$CREDIT.HISTORY.LENGTH <-
   my.transform.to.month(merged$CREDIT.HISTORY.LENGTH)
@@ -119,61 +117,60 @@ anyNA(merged[, !names(merged) %in% "Employment.Type"])
 ```
 ### Missing value treatment
 Now we can see that we have some NAs in our Employment.Type column. There are many techniques to treat missing values and we test some of them to choose the one that will fill our missing values with as small probability of error as possible
+library(mice) will require some time to run and, as you can see, the first method offers the best accuracy from three of them, so this chunk can be easily skipped
 ```{r}
-# my.simulate <- function(data, na.num) {
-#   data[sample(1:nrow(data), na.num), "Employment.Type"] <- NA
-#   return(data)
-# }
-# 
-# # first method
-library(rpart)
-# 
-# # get all the observations without NA - original and simulate 100 missing values
-# merged.wo.na <- merged[!is.na(merged$Employment.Type),]
-# my.sample <- my.simulate(merged.wo.na, 1000)
-# 
-# # using rpart to predict those 'missing values'
-# class_mod <- rpart(Employment.Type ~ .,
-#                    data=my.sample[!is.na(my.sample$Employment.Type), ], 
-#                    method="class", na.action=na.omit)  
-# Empl.pred <- predict(class_mod, my.sample[is.na(my.sample$Employment.Type), ])
-# 
-# # first accuracy, compute misclass error
-# actual <- merged.wo.na$Employment.Type[is.na(my.sample$Employment.Type)]
-# predicted <- as.factor(colnames(Empl.pred)[apply(Empl.pred, 1, which.max)])
-# mean(actual != predicted)  
-# # near 0.36
-# 
-# # second method
-# library(mice)
-# 
-# # perform mice imputation, based on random forests.
-# miceMod <- mice(my.sample, method="rf")  
-# miceOutput <- complete(miceMod)  # generate the completed data.
-# # anyNA(miceOutput)
-# predicted <- miceOutput[is.na(my.sample$Employment.Type), "Employment.Type"]
-# mean(actual != predicted)
-# # 0.438
-# 
-# miceMod2 <- mice(my.sample, method='polyreg', seed = 500)
-# miceOutput2 <- complete(miceMod2,2)
-# predicted <- miceOutput2[is.na(my.sample$Employment.Type), "Employment.Type"]
-# mean(actual != predicted)
-# # 0.416
-# 
-# # third
-# library(Hmisc)
-# 
-# # replace with median
-# result <- as.numeric(impute(my.sample$Employment.Type, median))  
-# predicted <- result[is.na(my.sample$Employment.Type)]
-# mean(actual != predicted)
-# # 0.441
-```
+my.simulate <- function(data, na.num) {
+  data[sample(1:nrow(data), na.num), "Employment.Type"] <- NA
+  return(data)
+}
 
-```{r}
+# first method
+library(rpart)
+
 # get all the observations without NA - original and simulate 100 missing values
+merged.wo.na <- merged[!is.na(merged$Employment.Type),]
+my.sample <- my.simulate(merged.wo.na, 1000)
+
 # using rpart to predict those 'missing values'
+class_mod <- rpart(Employment.Type ~ .,
+                   data=my.sample[!is.na(my.sample$Employment.Type), ],
+                   method="class", na.action=na.omit)
+Empl.pred <- predict(class_mod, my.sample[is.na(my.sample$Employment.Type), ])
+# first accuracy, compute misclass error
+actual <- merged.wo.na$Employment.Type[is.na(my.sample$Employment.Type)]
+predicted <- as.factor(colnames(Empl.pred)[apply(Empl.pred, 1, which.max)])
+mean(actual != predicted)
+# near 0.36
+
+# second method
+library(mice)
+# reduce size to speed up mice
+merged.wo.na2 <- merged.wo.na[sample(1:nrow(merged.wo.na), 5000),]
+my.sample2 <- my.simulate(merged.wo.na2, 500)
+# perform mice imputation, based on random forests.
+miceMod <- mice(my.sample2, method='polyreg', seed = 500)
+miceOutput <- complete(miceMod,2)
+actual2 <- merged.wo.na2$Employment.Type[is.na(my.sample2$Employment.Type)]
+predicted2 <- miceOutput[is.na(my.sample2$Employment.Type), "Employment.Type"]
+mean(actual2 != predicted2)
+# 0.44
+
+# third
+library(Hmisc)
+merged.wo.na <- merged[!is.na(merged$Employment.Type),]
+my.sample <- my.simulate(merged.wo.na, 10000)
+actual <- as.numeric(merged.wo.na$Employment.Type[is.na(my.sample$Employment.Type)])
+# replace with median
+result <- as.numeric(impute(my.sample$Employment.Type, median))
+predicted <- result[is.na(my.sample$Employment.Type)]
+mean(actual != predicted)
+# 0.441
+```
+So, we can see that the first method is little bit more efficient than two others so we use library(rpart) to fill the gaps where NAs stand
+```{r}
+# library(rpart)
+# using rpart to predict those 'missing values'
+# before treatment, amount of NA
 sum(is.na(merged$Employment.Type))
 class_mod <- rpart(Employment.Type ~ .,
                    data=merged[!is.na(merged$Employment.Type), ], 
@@ -181,6 +178,7 @@ class_mod <- rpart(Employment.Type ~ .,
 Empl.pred <- predict(class_mod, merged[is.na(merged$Employment.Type), ])
 predicted <- as.factor(colnames(Empl.pred)[apply(Empl.pred, 1, which.max)])
 merged$Employment.Type[is.na(merged$Employment.Type)] <- predicted
+# after treatment there is no NAs
 anyNA(merged$Employment.Type)
 ```
 ##Visualization
@@ -313,10 +311,10 @@ train$loan_default <- factor(train$loan_default)
 
 train_set <- sample(1:nrow(train), 50000)
 
-lda_model <- lda(loan_default ~., data = train[, -c(11, 14)], subset=train_set)
+lda_model <- lda(loan_default ~.-UniqueID, data = train[, -c(11, 14)], subset=train_set)
 
 # shows you the mean, used for LDA
-head(lda_model$means)
+head(as.data.frame(lda_model$means))
 
 #Predictions on the test data
 lda_pred <- predict(object = lda_model, newdata = train[-train_set, ])
@@ -325,46 +323,35 @@ train_test <- train[-train_set, ]
 
 actual <- train_test$loan_default
 predicted <- lda_pred$class
-mean(actual != predicted)
+# accuracy of our LDA prediction
+1 - mean(actual != predicted)
 ```
 
 ```{r}
-library(SDMTools)
-con.m <- confusion.matrix(actual, predicted)
-con.m
 library(caret)
 conf <- confusionMatrix(predicted, actual)
 conf
 
 qplot(actual, predicted, colour= actual, geom = c("boxplot", "jitter"), main = "predicted vs. observed in validation data", xlab = "Observed Classe", ylab = "Predicted Classe")
 
+# one more beautiful grapphics
 fourfoldplot(conf$table, color = c("#CC6666", "#99CC99"),
              conf.level = 0, margin = 1, main = "Confusion Matrix")
 
-library(caret)
-plot(conf$table)
 ```
 ## Variable selection
 ```{r}
-# simulate$loan_default <- as.numeric(simulate$loan_default)
-# library(caret)
-# 
-# glm_model <- glm(formula = loan_default ~ ., data = simulate)
-# importance1 <- varImp(glm_model)
-# 
-# sapply(simulate, anyNA)
-# 
-# anyNA(simulate)
-# library(randomForest)
-# rf_model = randomForest(loan_default~., data=simulate)
-# # Create an importance based on mean decreasing gini
-# importance2 <- importance(rf_model)
-# 
-# #ranks features, the bigger oberall, the more var is important
-# head(importance1)
-# head(importance2)
-# # open in large window
-# varImpPlot(rf_model)
+#train$loan_default <- as.numeric(train$loan_default)-1
+
+library(randomForest)
+rf_model = randomForest(loan_default~.-UniqueID, data=train[sample(1:nrow(train), 10000),])
+# Create an importance based on mean decreasing gini
+importance.table <- importance(rf_model)
+
+#ranks features, the bigger oberall, the more var is important
+head(importance.table)
+# open in large window
+varImpPlot(rf_model)
 ```
 ## Modeling
 
@@ -396,6 +383,7 @@ testing <- train[ -splitting, ]
 
 upd_logit <- train(as.factor(loan_default) ~ ., data = select(training, -c(PRI.SANCTIONED.AMOUNT, PRI.DISBURSED.AMOUNT, SEC.OVERDUE.ACCTS, SEC.CURRENT.BALANCE, SEC.NO.OF.ACCTS, SEC.ACTIVE.ACCTS, SEC.SANCTIONED.AMOUNT, SEC.DISBURSED.AMOUNT, PRIMARY.INSTAL.AMT, SEC.INSTAL.AMT, NEW.ACCTS.IN.LAST.SIX.MONTHS, VoterID_flag, MobileNo_Avl_Flag, State_ID, DisbursalDate)), family = "binomial", method="glm")
 summary(upd_logit)
+
 ```
 
 ```{r}
