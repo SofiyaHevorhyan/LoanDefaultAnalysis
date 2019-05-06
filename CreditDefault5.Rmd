@@ -335,9 +335,8 @@ conf
 qplot(actual, predicted, colour= actual, geom = c("boxplot", "jitter"), main = "predicted vs. observed in validation data", xlab = "Observed Classe", ylab = "Predicted Classe")
 
 # one more beautiful grapphics
-fourfoldplot(conf$table, color = c("#CC6666", "#99CC99"),
+fourfoldplot(conf$table, color = c("#ADFFA2", "#FFA0A0"),
              conf.level = 0, margin = 1, main = "Confusion Matrix")
-
 ```
 ## Variable selection
 ```{r}
@@ -352,8 +351,24 @@ importance.table <- importance(rf_model)
 head(importance.table)
 # open in large window
 varImpPlot(rf_model)
+
+var.for.model <- rownames(importance.table)[apply(importance.table, 1, function(x) x > 100)]
+data.model1 <- train[, c(var.for.model, "loan_default")]
 ```
 ## Modeling
+### Model using randomForest variables
+```{r}
+model1 <- step(glm(loan_default~., 
+                   family = binomial(link=logit),data = data.model1))
+
+summary(model1)
+
+confusion <- confusionMatrix(as.factor(round(model1$fitted.values)), train$loan_default)
+confusion$overall
+
+fourfoldplot(confusion$table, color = c("#ADFFA2", "#FFA0A0"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
 
 
 ```{r}
@@ -381,7 +396,7 @@ splitting <- createDataPartition(y=train$loan_default, p=0.6, list=FALSE)
 training <- train[ splitting, ]
 testing <- train[ -splitting, ]
 
-upd_logit <- train(as.factor(loan_default) ~ ., data = select(training, -c(PRI.SANCTIONED.AMOUNT, PRI.DISBURSED.AMOUNT, SEC.OVERDUE.ACCTS, SEC.CURRENT.BALANCE, SEC.NO.OF.ACCTS, SEC.ACTIVE.ACCTS, SEC.SANCTIONED.AMOUNT, SEC.DISBURSED.AMOUNT, PRIMARY.INSTAL.AMT, SEC.INSTAL.AMT, NEW.ACCTS.IN.LAST.SIX.MONTHS, VoterID_flag, MobileNo_Avl_Flag, State_ID, DisbursalDate)), family = "binomial", method="glm")
+upd_logit <- train(as.factor(loan_default) ~ ., data = select(training, -c(PRI.DISBURSED.AMOUNT, PRI.NO.OF.ACCTS, Passport_flag, Driving_flag, PRI.CURRENT.BALANCE, PRI.ACTIVE.ACCTS, SEC.OVERDUE.ACCTS, SEC.CURRENT.BALANCE, SEC.NO.OF.ACCTS, SEC.ACTIVE.ACCTS, SEC.SANCTIONED.AMOUNT, SEC.DISBURSED.AMOUNT, PRIMARY.INSTAL.AMT, SEC.INSTAL.AMT, NEW.ACCTS.IN.LAST.SIX.MONTHS, VoterID_flag, MobileNo_Avl_Flag, State_ID, DisbursalDate, UniqueID, supplier_id, branch_id, manufacturer_id, Current_pincode_ID, Employee_code_ID)), family = "binomial", method="glm")
 summary(upd_logit)
 
 ```
@@ -392,7 +407,16 @@ summary(upd_logit)
 
 pred = predict(upd_logit, newdata=testing)
 
-confusionMatrix(table(pred, testing$loan_default))
+confusion <- confusionMatrix(table(pred, testing$loan_default))
 ```
+
+```{r}
+qplot(testing$loan_default, pred, colour= testing$loan_default, geom = c("boxplot", "jitter"), main = "predicted vs. observed in validation data", xlab = "Observed Classe", ylab = "Predicted Classe")
+
+fourfoldplot(confusion$table, color = c("#ADFFA2", "#FFA0A0"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
+
+
 
 
