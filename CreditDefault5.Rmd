@@ -1,0 +1,409 @@
+---
+title: "Credit Default"
+author: "Elena Lazarenko, Sofiya Hevorhyan"
+date: "April 2019"
+output: html_notebook
+---
+<style type="text/css">
+
+body{ /* Normal  */
+  font-size: 16px;
+  color: black;
+  font-family: "Times New Roman", Times, serif;
+  /*background-image: url();*/
+  background-position: center center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  }
+h1.title {
+  font-size: 34px;
+  color: Purple;
+}
+h1 { /* Header 1 */
+  font-size: 28px;
+  color: purple;
+}
+h2 { /* Header 2 */
+    font-size: 22px;
+  font-family: "Times New Roman", Times, serif;
+  color: purple;
+}
+h3 { /* Header 3 */
+  font-size: 18px;
+  font-family: "Times New Roman", Times, serif;
+  color: black;
+}
+</style>
+*The aim of these project is to analyze data set from https://www.kaggle.com/roshansharma/loan-default-prediction which contains data about loan defaults over 200 000 observations. We will try to predict the outcomes on test data to get some insights about further loan default cases*
+
+## Preparation of Data
+### Read
+First of all, we read data and will try to explore it. To do things simplier wihtout code reapiting, we merge data sets test and train, adding the col istest as a indicator of observation identity and save info about loan default.
+```{r}
+test <- read.csv(file="data/test_bqCt9Pv.csv", header=TRUE, as.is=TRUE)
+train <- read.csv(file="data/train.csv", header=TRUE, as.is=TRUE)
+
+# to later identify correctly
+test$istest <- 1
+train$istest <- 0
+
+n_train <- length(train)
+loan_def <- train$loan_default
+
+merged <- rbind(train[, -41], test)
+
+head(merged)
+```
+### Explore
+Our next step is to take closer look at the data, does is have any NAs and with which classes we will work
+```{r}
+# check whether we have any NA in any of the rows
+anyNA(merged)
+
+# check data type
+sapply(merged, class)
+```
+### Retype
+```{r}
+library('stringr')
+
+# character to date
+merged$Date.of.Birth <- as.Date(merged$Date.of.Birth, "%d-%m-%y")
+merged$DisbursalDate <- as.Date(merged$DisbursalDate, "%d-%m-%y")
+
+# and now date to integer year which will be more descriptive and useful for our model
+merged$Date.of.Birth <- as.numeric(format(merged$Date.of.Birth, '%Y'))
+merged$DisbursalDate <- as.numeric(format(merged$DisbursalDate, '%Y'))
+
+# character to factor
+unique(merged$Employment.Type)
+merged$Employment.Type[merged$Employment.Type==""] <- NA
+merged$Employment.Type <- as.factor(merged$Employment.Type)
+head(merged$Employment.Type)
+
+# description categories, store in another variable and delete from dataset
+score.description <- merged$PERFORM_CNS.SCORE.DESCRIPTION
+merged <- merged[, !names(merged) %in% "PERFORM_CNS.SCORE.DESCRIPTION"]
+
+# some functions
+my.replace <- function(column, patt, replacem) {
+  new.col <- str_replace(column, 
+                         pattern=patt,
+                         replacement=replacem)
+  return(new.col)
+}
+
+my.transform.to.month <- function(column) {
+  new.column <- my.replace(column, "yrs ", "|")
+  new.column <- my.replace(new.column, "mon", "")
+ 
+  lst.help <- strsplit(new.column, "|", fixed=T)
+  new.column <- sapply(lst.help, function(x) as.numeric(x[1])*12 + 
+                   as.numeric(x[2]))
+   return(new.column)
+}
+
+# deal with avr acct age and credit history length
+merged
+merged$AVERAGE.ACCT.AGE <- my.transform.to.month(merged$AVERAGE.ACCT.AGE)
+merged$CREDIT.HISTORY.LENGTH <-
+  my.transform.to.month(merged$CREDIT.HISTORY.LENGTH)
+
+# change the name of col AVERAGE.ACCT.AGE and CREDIT.HISTORY.LENGTH
+names(merged)[37] <- "AVERAGE.ACC.AGE.MONTH"
+names(merged)[38] <- "CREDIT.HISTORY.LENGTH.MONTH"
+
+anyNA(merged[, !names(merged) %in% "Employment.Type"])
+```
+### Missing value treatment
+Now we can see that we have some NAs in our Employment.Type column. There are many techniques to treat missing values and we test some of them to choose the one that will fill our missing values with as small probability of error as possible
+```{r}
+# my.simulate <- function(data, na.num) {
+#   data[sample(1:nrow(data), na.num), "Employment.Type"] <- NA
+#   return(data)
+# }
+# 
+# # first method
+library(rpart)
+# 
+# # get all the observations without NA - original and simulate 100 missing values
+# merged.wo.na <- merged[!is.na(merged$Employment.Type),]
+# my.sample <- my.simulate(merged.wo.na, 1000)
+# 
+# # using rpart to predict those 'missing values'
+# class_mod <- rpart(Employment.Type ~ .,
+#                    data=my.sample[!is.na(my.sample$Employment.Type), ], 
+#                    method="class", na.action=na.omit)  
+# Empl.pred <- predict(class_mod, my.sample[is.na(my.sample$Employment.Type), ])
+# 
+# # first accuracy, compute misclass error
+# actual <- merged.wo.na$Employment.Type[is.na(my.sample$Employment.Type)]
+# predicted <- as.factor(colnames(Empl.pred)[apply(Empl.pred, 1, which.max)])
+# mean(actual != predicted)  
+# # near 0.36
+# 
+# # second method
+# library(mice)
+# 
+# # perform mice imputation, based on random forests.
+# miceMod <- mice(my.sample, method="rf")  
+# miceOutput <- complete(miceMod)  # generate the completed data.
+# # anyNA(miceOutput)
+# predicted <- miceOutput[is.na(my.sample$Employment.Type), "Employment.Type"]
+# mean(actual != predicted)
+# # 0.438
+# 
+# miceMod2 <- mice(my.sample, method='polyreg', seed = 500)
+# miceOutput2 <- complete(miceMod2,2)
+# predicted <- miceOutput2[is.na(my.sample$Employment.Type), "Employment.Type"]
+# mean(actual != predicted)
+# # 0.416
+# 
+# # third
+# library(Hmisc)
+# 
+# # replace with median
+# result <- as.numeric(impute(my.sample$Employment.Type, median))  
+# predicted <- result[is.na(my.sample$Employment.Type)]
+# mean(actual != predicted)
+# # 0.441
+```
+
+```{r}
+# get all the observations without NA - original and simulate 100 missing values
+# using rpart to predict those 'missing values'
+sum(is.na(merged$Employment.Type))
+class_mod <- rpart(Employment.Type ~ .,
+                   data=merged[!is.na(merged$Employment.Type), ], 
+                   method="class", na.action=na.omit)  
+Empl.pred <- predict(class_mod, merged[is.na(merged$Employment.Type), ])
+predicted <- as.factor(colnames(Empl.pred)[apply(Empl.pred, 1, which.max)])
+merged$Employment.Type[is.na(merged$Employment.Type)] <- predicted
+anyNA(merged$Employment.Type)
+```
+##Visualization
+
+##Donut!
+```{r}
+# The doughnut function permits to draw a donut plot
+doughnut <- function(x, labels = names(x), edges = 200, outer.radius = 0.8,
+                     inner.radius=0.6, clockwise = FALSE,
+                     init.angle = if (clockwise) 90 else 0, density = NULL,
+                     angle = 45, col = NULL, border = FALSE, lty = NULL, 
+                     main = NULL, ...) {
+  if (!is.numeric(x) || any(is.na(x) | x < 0))
+    stop("'x' values must be positive.")
+  
+  if (is.null(labels))
+    labels <- as.character(seq_along(x))
+  else labels <- as.graphicsAnnot(labels)
+  
+  x <- c(0, cumsum(x)/sum(x))
+  dx <- diff(x)
+  nx <- length(dx)
+  plot.new()
+  pin <- par("pin")
+  xlim <- ylim <- c(-1, 1)
+  if (pin[1L] > pin[2L])
+    xlim <- (pin[1L]/pin[2L]) * xlim
+  else 
+    ylim <- (pin[2L]/pin[1L]) * ylim
+  
+  plot.window(xlim, ylim, "", asp = 1)
+  if (is.null(col))
+    col <- if (is.null(density))
+      palette() else par("fg")
+  col <- rep(col, length.out = nx)
+  border <- rep(border, length.out = nx)
+  lty <- rep(lty, length.out = nx)
+  angle <- rep(angle, length.out = nx)
+  density <- rep(density, length.out = nx)
+  twopi <- if (clockwise)-2 * pi
+  else 2 * pi
+  
+  t2xy <- function(t, radius) {
+    t2p <- twopi * t + init.angle * pi/180
+    list(x = radius * cos(t2p), 
+         y = radius * sin(t2p))
+    }
+  for (i in 1L:nx) {
+    n <- max(2, floor(edges * dx[i]))
+    P <- t2xy(seq.int(x[i], x[i + 1], length.out = n), outer.radius)
+    polygon(c(P$x, 0), c(P$y, 0), density = density[i], 
+            angle = angle[i], border = border[i], 
+            col = col[i], lty = lty[i])
+    Pout <- t2xy(mean(x[i + 0:1]), outer.radius)
+    lab <- as.character(labels[i])
+    if (!is.na(lab) && nzchar(lab)) {
+      lines(c(1, 1.05) * Pout$x, c(1, 1.05) * Pout$y)
+      text(1.1 * Pout$x, 1.1 * Pout$y, labels[i], 
+           xpd = TRUE, adj = ifelse(Pout$x < 0, 1, 0), ...)
+      }
+    ## Add white disc          
+    Pin <- t2xy(seq.int(0, 1, length.out = n*nx),
+                inner.radius)
+    polygon(Pin$x, Pin$y, density = density[i], 
+            angle = angle[i], border = border[i], 
+            col = "white", lty = lty[i])
+    }
+  title(main = main, ...)
+  invisible(NULL)
+  }
+```
+
+
+```{r}
+# load GGplot2
+library(ggplot2)
+
+# Create test data.
+dat = table(merged$Employment.Type)
+dat = as.data.frame(dat)
+
+colnames(dat)[colnames(dat)=="Var1"] <- "Employment.Type"
+colnames(dat)[colnames(dat)=="Freq"] <- "count"
+
+doughnut( x=c(dat$count), labels=dat$Employment.Type, inner.radius=0.5, col=c(rgb(0.3,0.1,0.5,0.6), rgb(0.8,0.2,0.4,0.5), rgb(0.2,0.9,0.4,0.4) , rgb(0.0,0.9,0.8,0.4)), main='Types of Employment' )
+```
+
+```{r}
+summary(merged$disbursed_amount)
+```
+
+##Distribution of disbursed amount
+```{r}
+hist(merged$disbursed_amount, xlim=c(28902, 82094), breaks=1000, main='Distribution of disbursed amount', col="blue", border="white")
+```
+
+
+```{r}
+summary(merged$asset_cost)
+```
+
+##Distribution of disbursed amount
+```{r}
+hist(merged$asset_cost, xlim=c(40117, 80040), breaks=1000, main='Distribution of asset cost', col="green", border="white")
+```
+
+```{r}
+summary(merged$Date.of.Birth)
+```
+
+```{r}
+hist(merged$Date.of.Birth, xlim=c(1969, 2068), breaks=60, main='Distribution year of birth', col="orange", border="white", probability = TRUE)
+```
+
+## LDA
+```{r}
+library(MASS)
+
+merged$Employment.Type <- as.numeric(merged$Employment.Type)-1
+names(merged)[10] <- "is.Self.Employed"
+
+train <- merged[merged$istest==0,]
+train$loan_default <- loan_def
+train$istest <- NULL
+
+test <- merged[merged$istest==1,]
+test$istest <- NULL
+
+train$loan_default <- factor(train$loan_default)
+
+train_set <- sample(1:nrow(train), 50000)
+
+lda_model <- lda(loan_default ~., data = train[, -c(11, 14)], subset=train_set)
+
+# shows you the mean, used for LDA
+head(lda_model$means)
+
+#Predictions on the test data
+lda_pred <- predict(object = lda_model, newdata = train[-train_set, ])
+head(lda_pred$class)
+train_test <- train[-train_set, ]
+
+actual <- train_test$loan_default
+predicted <- lda_pred$class
+mean(actual != predicted)
+```
+
+```{r}
+library(SDMTools)
+con.m <- confusion.matrix(actual, predicted)
+con.m
+library(caret)
+conf <- confusionMatrix(predicted, actual)
+conf
+
+qplot(actual, predicted, colour= actual, geom = c("boxplot", "jitter"), main = "predicted vs. observed in validation data", xlab = "Observed Classe", ylab = "Predicted Classe")
+
+fourfoldplot(conf$table, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+
+library(caret)
+plot(conf$table)
+```
+## Variable selection
+```{r}
+# simulate$loan_default <- as.numeric(simulate$loan_default)
+# library(caret)
+# 
+# glm_model <- glm(formula = loan_default ~ ., data = simulate)
+# importance1 <- varImp(glm_model)
+# 
+# sapply(simulate, anyNA)
+# 
+# anyNA(simulate)
+# library(randomForest)
+# rf_model = randomForest(loan_default~., data=simulate)
+# # Create an importance based on mean decreasing gini
+# importance2 <- importance(rf_model)
+# 
+# #ranks features, the bigger oberall, the more var is important
+# head(importance1)
+# head(importance2)
+# # open in large window
+# varImpPlot(rf_model)
+```
+## Modeling
+
+
+```{r}
+library(dummies)
+library(dplyr)
+#train <- dummy.data.frame(train, names = c("Employment.Type") , sep = ".") 
+#colnames(train)[which(names(train) == "Employment.Type.Self employed")] <- "Employment.Type.Self.employed"
+```
+
+```{r}
+train
+# More than of birthday dates is missed
+table(is.na(train$Date.of.Birth))
+logit <- glm(loan_default ~ ., data = train, family = "binomial")
+summary(logit)
+library(corrplot)
+cor(train$PRI.ACTIVE.ACCTS, train$SEC.ACTIVE.ACCTS)
+```
+
+```{r}
+library(caret)
+varImp(logit)
+
+splitting <- createDataPartition(y=train$loan_default, p=0.6, list=FALSE)
+training <- train[ splitting, ]
+testing <- train[ -splitting, ]
+
+upd_logit <- train(as.factor(loan_default) ~ ., data = select(training, -c(PRI.SANCTIONED.AMOUNT, PRI.DISBURSED.AMOUNT, SEC.OVERDUE.ACCTS, SEC.CURRENT.BALANCE, SEC.NO.OF.ACCTS, SEC.ACTIVE.ACCTS, SEC.SANCTIONED.AMOUNT, SEC.DISBURSED.AMOUNT, PRIMARY.INSTAL.AMT, SEC.INSTAL.AMT, NEW.ACCTS.IN.LAST.SIX.MONTHS, VoterID_flag, MobileNo_Avl_Flag, State_ID, DisbursalDate)), family = "binomial", method="glm")
+summary(upd_logit)
+```
+
+```{r}
+
+#Predictions on the test data
+
+pred = predict(upd_logit, newdata=testing)
+
+confusionMatrix(table(pred, testing$loan_default))
+```
+
+
